@@ -30,6 +30,9 @@ Thumbs.db
 .DocumentRevisions*
 .TemporaryItems
 .Trashes
+.github
+.vscode
+*.code-workspace
 
 # Other paths to ignore
 .awcache

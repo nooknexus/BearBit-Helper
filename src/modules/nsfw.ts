@@ -68,12 +68,67 @@ function disableBlurNsfw() {
 
     if (screenshots) {
       screenshots.forEach(img => {
-        const styles = window.getComputedStyle(img);
-        if (styles.getPropertyValue('filter')) {
-          (img as HTMLImageElement).style.removeProperty('filter');
+        const td = img.parentNode as HTMLElement;
+        const row = td.parentNode;
+        
+        // Check category id - try multiple selectors
+        let categoryId = '';
+        if (row) {
+          // Try different ways to find the category link
+          let category = row.querySelector('td > a') as HTMLAnchorElement;
+          
+          // If not found, try to find any link with cat parameter
+          if (!category) {
+            const allLinks = row.querySelectorAll('a');
+            for (const link of allLinks) {
+              if ((link as HTMLAnchorElement).href.includes('cat=')) {
+                category = link as HTMLAnchorElement;
+                break;
+              }
+            }
+          }
+          
+          if (category) {
+            const categoryUrl = category.href;
+            // Parse URL to get cat parameter
+            try {
+              const url = new URL(categoryUrl);
+              categoryId = url.searchParams.get('cat') ?? '';
+              
+              // Fallback: try parsing from href string
+              if (!categoryId && categoryUrl.includes('cat=')) {
+                const match = categoryUrl.match(/cat=(\d+)/);
+                if (match) {
+                  categoryId = match[1];
+                }
+              }
+            } catch (e) {
+              // Fallback parsing if URL constructor fails
+              if (categoryUrl.includes('cat=')) {
+                const match = categoryUrl.match(/cat=(\d+)/);
+                if (match) {
+                  categoryId = match[1];
+                }
+              }
+            }
+          }
         }
-        const td = img.parentNode;
-        (td as HTMLElement).removeAttribute('bearbit-nsfw');
+        
+        //console.log('Category ID:', categoryId); // Debug log
+        
+        // Keep blur for cat=908, remove blur for others
+        if (categoryId !== '908') {
+          const styles = window.getComputedStyle(img);
+          if (styles.getPropertyValue('filter')) {
+            (img as HTMLImageElement).style.removeProperty('filter');
+          }
+          td.removeAttribute('bearbit-nsfw');
+        } else {
+          console.log('Keeping blur for category 908'); // Debug log
+          // Ensure blur is applied for category 908
+          (img as HTMLImageElement).style.filter = 'blur(5px)';
+          td.setAttribute('bearbit-nsfw', 'checked');
+        }
       });
     }
   }

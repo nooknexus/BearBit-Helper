@@ -12,6 +12,53 @@ import { enableBlurNsfw } from './nsfw';
 
 const allowedExtensions = ['jpg', 'jpeg', 'png', 'gif'];
 
+function convertImgbbUrl(url: string): string[] {
+  // Convert imgbb.ws short URL to multiple possible direct image URLs
+  if (url.includes('imgbb.ws/') && !url.includes('/file/storage-sv')) {
+    // Extract the image ID from URL like https://imgbb.ws/PrOpt
+    const match = url.match(/imgbb\.ws\/([^\/\?\s]+)/);
+    if (match && match[1]) {
+      const imageId = match[1];
+      // Try multiple servers and extensions
+      return [
+        `https://s2.imgbb.ws/file/storage-sv2/${imageId}.png`,
+        `https://s2.imgbb.ws/file/storage-sv2/${imageId}.jpg`,
+        `https://s1.imgbb.ws/file/storage-sv1/${imageId}.png`,
+        `https://s1.imgbb.ws/file/storage-sv1/${imageId}.jpg`,
+        `https://s3.imgbb.ws/file/storage-sv3/${imageId}.png`,
+        `https://s3.imgbb.ws/file/storage-sv3/${imageId}.jpg`
+      ];
+    }
+  }
+  return [url];
+}
+
+async function tryMultipleUrls(urls: string[]): Promise<string | null> {
+  for (const url of urls) {
+    try {
+      // Try to load image to check if it exists
+      const img = new Image();
+      const imageLoaded = new Promise<boolean>((resolve) => {
+        img.onload = () => resolve(true);
+        img.onerror = () => resolve(false);
+        // Set timeout to prevent hanging
+        setTimeout(() => resolve(false), 3000);
+      });
+      
+      img.src = url;
+      const loaded = await imageLoaded;
+      
+      if (loaded) {
+        return url;
+      }
+    } catch (error) {
+      // Continue to next URL
+      continue;
+    }
+  }
+  return null;
+}
+
 function enableScreenshot(blurNsfw: boolean) {
   const path = window.location.pathname;
   if (
@@ -166,32 +213,88 @@ async function addScreenshotImageToCell(cell: HTMLTableCellElement) {
       cell.setAttribute('bearbit-screenshot', 'preview');
       blurNsfwHandler();
     } else {
-      const imageUrl = (cameraIcon.parentNode as HTMLAnchorElement).href ?? '';
-      const extension = imageUrl.split('.').pop() ?? '';
+      const rawImageUrl = (cameraIcon.parentNode as HTMLAnchorElement).href ?? '';
+      // Clean URL by removing whitespace and newlines
+      const cleanedUrl = rawImageUrl.trim().replace(/\s+/g, '');
+      // Convert imgbb.ws URLs to multiple possible direct image URLs
+      const possibleUrls = convertImgbbUrl(cleanedUrl);
+      
+      // Try to find a working URL
+      const workingUrl = await tryMultipleUrls(possibleUrls);
+      
+      if (workingUrl) {
+        const extension = workingUrl.split('.').pop() ?? '';
 
-      if (allowedExtensions.indexOf(extension) !== -1) {
-        const image = createImageElement(imageUrl, imageWidth, imageHeight);
-        image.style.cursor = 'pointer';
-        image.onclick = () => {
-          openScreenshotModal(imageUrl);
-        };
-        cell.innerHTML = '';
-        cell.appendChild(image);
-        cell.setAttribute('bearbit-screenshot', 'preview');
-        blurNsfwHandler();
-
-        // set cache
-        try {
-          const imageBlob = await fetchImage(imageUrl);
-          const imageBase64 = await convertBlobToBase64(imageBlob);
-
-          const cacheData: PosterDetails = {
-            id: details.torrentId,
-            image: imageBase64
+        if (allowedExtensions.indexOf(extension) !== -1) {
+          const image = createImageElement(workingUrl, imageWidth, imageHeight);
+          image.style.cursor = 'pointer';
+          image.onclick = () => {
+            openScreenshotModal(workingUrl);
           };
-          addCacheData(cacheData, CACHE_DEFAULT_EXPIRE, DB_POSTER_OBJECT_NAME);
-        } catch (error) {
-          console.error(error);
+          cell.innerHTML = '';
+          cell.appendChild(image);
+          cell.setAttribute('bearbit-screenshot', 'preview');
+          blurNsfwHandler();
+
+          // set cache
+          try {
+            const imageBlob = await fetchImage(workingUrl);
+            const imageBase64 = await convertBlobToBase64(imageBlob);
+
+            const cacheData: PosterDetails = {
+              id: details.torrentId,
+              image: imageBase64
+            };
+            addCacheData(cacheData, CACHE_DEFAULT_EXPIRE, DB_POSTER_OBJECT_NAME);
+          } catch (error) {
+            console.error(error);
+          }
+        } else {
+          // Show no preview image if extension not supported
+          const imageNoPreview = 'nopreview';
+          const imageWidth = '64px';
+          const imageHeight = '64px';
+
+          const cache: PosterDetails = await getCacheData(
+            imageNoPreview,
+            DB_POSTER_OBJECT_NAME
+          );
+
+          if (cache) {
+            const image = createImageElement(
+              cache?.image,
+              imageWidth,
+              imageHeight
+            );
+            cell.innerHTML = '';
+            cell.appendChild(image);
+            cell.setAttribute('bearbit-screenshot', 'no-preview');
+          } else {
+            const imageUrl = 'https://i.imgur.com/eScU17W.png';
+            const image = createImageElement(imageUrl, imageWidth, imageHeight);
+            image.style.marginLeft = '10px';
+            cell.innerHTML = '';
+            cell.appendChild(image);
+            cell.setAttribute('bearbit-screenshot', 'no-preview');
+
+            // set cache
+            try {
+              const imageBlob = await fetchImage(imageUrl);
+              const imageBase64 = await convertBlobToBase64(imageBlob);
+
+              const cacheData: PosterDetails = {
+                id: imageNoPreview,
+                image: imageBase64
+              };
+              addCacheData(
+                cacheData,
+                CACHE_DEFAULT_EXPIRE,
+                DB_POSTER_OBJECT_NAME
+              );
+            } catch (error) {
+              console.error(error);
+            }
+          }
         }
       } else {
         const imageNoPreview = 'nopreview';
